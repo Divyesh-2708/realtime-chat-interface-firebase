@@ -1,0 +1,15 @@
+<p>chat-interface works!</p>
+<div class="chat-window">
+  <div *ngFor="let msg of messages">
+  <div class="message">
+    {{ msg.text }}
+    <span><small>{{msg.timestemp}}</small></span>
+  </div>
+</div>
+  <form (ngSubmit)="sendMessage()">
+    <mat-form-field class="message-input">
+      <input matInput [(ngModel)]="newMessage" name="message" placeholder="Type a message..." />
+    </mat-form-field>
+    <button mat-icon-button type="submit"><mat-icon>send</mat-icon></button>
+  </form>
+</div>

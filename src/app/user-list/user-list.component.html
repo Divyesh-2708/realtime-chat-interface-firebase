@@ -1,0 +1,11 @@
+<mat-nav-list>
+  <mat-list-item *ngFor="let user of users">
+    <span>{{ user.name }}</span>
+    <button mat-icon-button (click)="startCall(user)">
+      <mat-icon>videocam</mat-icon>
+    </button>
+    <button mat-icon-button (click)="openChat(user)">
+      <mat-icon>chat</mat-icon>
+    </button>
+  </mat-list-item>
+</mat-nav-list>
