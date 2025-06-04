@@ -181,7 +181,7 @@ export class WebrtcService {
       await this.peerConnection.addIceCandidate(candidate);
       console.log('Successfully added ICE candidate');
     } catch (error) {
-      console.error('Error adding ICE candidate:', error);
+      console.log('Error adding ICE candidate:', error);
       // Optionally retry or implement fallback
     }
   }
