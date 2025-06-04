@@ -38,6 +38,8 @@ export class FirebaseService {
   updateUserStatus(uid: string, status: 'online' | 'offline') {
     return setDoc(doc(this.firestore, 'users', uid), { status }, { merge: true });
   }
+
+  
   async createCallDoc(uid1: string, uid2: string): Promise<DocumentReference> {
     const callId = uid1 < uid2 ? `${uid1}_${uid2}` : `${uid2}_${uid1}`;
     return doc(this.firestore, 'calls', callId);

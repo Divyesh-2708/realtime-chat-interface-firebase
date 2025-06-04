@@ -34,44 +34,43 @@ export class CallComponent implements OnInit, OnDestroy {
 
   async ngOnInit() {
     this.otherUserId = this.route.snapshot.params['uid'].split(`_${this.currentUserId}`)[0];
+    console.log(this.otherUserId);
+
+    this.webrtcService.resetConnection();
 
     this.callDoc = await this.firebaseService.createCallDoc(this.currentUserId, this.otherUserId);
-
-    // // Step 1: Set up remote stream handler BEFORE signaling
-    this.webrtcService.onRemoteStream((stream) => {
-      this.remoteVideo.nativeElement.srcObject = stream;
-    });
-
-    // Step 2: Init local stream and bind to local video
+    // Init local stream and bind to local video
     const localStream = await this.webrtcService.initLocalStream();
     this.localVideo.nativeElement.srcObject = localStream;
 
-    // // Step 3: Determine if initiating or answering call
-    // const callSnapshot = await getDoc(this.callDoc);
-    // if (!callSnapshot.exists()) {
-    //   console.log("📞 Creating offer...");
-    //   await this.webrtcService.createOffer(this.callDoc, this.currentUserId, this.otherUserId);
-    // } else {
-    //   console.log("📲 Answering call...");
-    //   await this.webrtcService.answerCall(this.callDoc);
-    // }
+    // Set up remote stream handler BEFORE signaling
+    this.webrtcService.onRemoteStream((stream) => {
+      this.remoteVideo.nativeElement.srcObject = stream;
+
+      // 👇 Ensure the video plays after metadata is loaded
+      this.remoteVideo.nativeElement.onloadedmetadata = () => {
+        console.log('🎬 Remote video metadata loaded, playing video...');
+        this.remoteVideo.nativeElement.play();
+      };
+    });
+
 
     const snapshot = await getDoc(this.callDoc);
     console.log(snapshot);
-    
-    const data:any = snapshot.data();
-    console.log(this.otherUserId,this.currentUserId);
-    
+
+    const data: any = snapshot.data();
+    console.log(this.otherUserId, this.currentUserId);
+
     if (data?.from === this.otherUserId && data?.to === this.currentUserId && data.offer) {
-      // This user is the callee
+      // callee
       console.log('📲 Answering call...');
       await this.webrtcService.answerCall(this.callDoc);
     } else {
-      // This user is the caller
+      // caller
       console.log('📞 Creating offer...');
       await this.webrtcService.createOffer(this.callDoc, this.currentUserId, this.otherUserId);
     }
-    // Step 4: Listen for ICE candidates
+    // Listen for ICE candidates
     this.webrtcService.listenForCandidates(this.callDoc, 'offer');
     this.webrtcService.listenForCandidates(this.callDoc, 'answer');
   }

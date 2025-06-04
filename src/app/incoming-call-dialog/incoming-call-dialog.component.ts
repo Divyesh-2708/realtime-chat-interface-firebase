@@ -23,6 +23,8 @@ constructor(
 
   acceptCall() {
     this.dialogRef.close();
+    console.log(this.data);
+    
     this.router.navigate(['/chat', this.data.callId,'call']);
   }
 

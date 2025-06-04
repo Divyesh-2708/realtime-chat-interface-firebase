@@ -15,20 +15,12 @@ export class WebrtcService {
   peerConnection: RTCPeerConnection;
   localStream!: MediaStream;
   remoteStream = new MediaStream();
-  private candidateQueue: RTCIceCandidate[] = [];
 
   constructor(private firestore: Firestore) {
     this.peerConnection = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302'}],
+      iceCandidatePoolSize:10,
     });
-
-    // Setup remote track listener immediately
-    this.peerConnection.ontrack = (event) => {
-      console.log("🎥 ontrack fired with streams:", event.streams);
-      event.streams[0].getTracks().forEach(track => {
-        this.remoteStream.addTrack(track);
-      });
-    };
   }
 
   async initLocalStream(): Promise<MediaStream> {
@@ -39,100 +31,156 @@ export class WebrtcService {
     return this.localStream;
   }
 
-  async createOffer(callDoc: any, from: string, to: string) {
+  async createOffer(callDocRef: any, from: string, to: string) {
+    this.resetConnection();
     const offer = await this.peerConnection.createOffer();
     await this.peerConnection.setLocalDescription(offer);
 
-    await setDoc(callDoc, {
-      from,
-      to,
-      offer: {
-        type: offer.type,
-        sdp: offer.sdp
-      },
-      timestamp: new Date().toISOString()
-    });
+
+    const offerCandidatesCollection = collection(this.firestore, `${callDocRef.path}/offerCandidates`);
 
     this.peerConnection.onicecandidate = (event) => {
       if (event.candidate) {
-        const iceCandidate = event.candidate.toJSON();
-        addDoc(collection(callDoc, 'offerCandidates'), iceCandidate);
+        addDoc(offerCandidatesCollection, event.candidate.toJSON());
       }
     };
+    await setDoc(callDocRef, {
+      from,
+      to,
+      offer,
+      timestamp: new Date().toISOString()
+    });
   }
 
-  async answerCall(callDoc: any) {
-    const offer = await this.waitForOffer(callDoc);
-    await this.peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+  async answerCall(callDocRef: any) {
+    this.resetConnection();
+    const callSnapshot = await getDoc(callDocRef);
+    const callData: any = callSnapshot.data();
+    if (!callData?.offer) {
+      throw new Error('Offer not found.');
+    }
+
+    await this.peerConnection.setRemoteDescription(new RTCSessionDescription(callData.offer));
 
     const answer = await this.peerConnection.createAnswer();
     await this.peerConnection.setLocalDescription(answer);
 
-    await updateDoc(callDoc, {
-      answer: {
-        type: answer.type,
-        sdp: answer.sdp
-      }
-    });
+    await updateDoc(callDocRef, { answer });
 
+    const answerCandidatesCollection = collection(this.firestore, `${callDocRef.path}/answerCandidates`);
     this.peerConnection.onicecandidate = (event) => {
       if (event.candidate) {
-        const iceCandidate = event.candidate.toJSON();
-        addDoc(collection(callDoc, 'answerCandidates'), iceCandidate);
+        addDoc(answerCandidatesCollection, event.candidate.toJSON());
       }
     };
   }
 
-  async waitForOffer(callDoc: any): Promise<any> {
-    let offer: any = null;
+  async listenForCandidates(callDocRef: any, type: 'offer' | 'answer') {
+    const candidatesCollection = collection(this.firestore, `${callDocRef.path}/${type}Candidates`);
+    const queue: RTCIceCandidateInit[] = [];
 
-    while (!offer) {
-      const callSnapshot = await getDoc(callDoc);
-      const data: any = callSnapshot.data();
-      offer = data?.offer;
+    // onSnapshot(candidatesCollection, (snapshot) => {
+    //   snapshot.docChanges().forEach((change) => {
+    //     if (change.type === 'added') {
+    //       const data = change.doc.data();
+    //       const candidate = new RTCIceCandidate(data);
 
-      if (!offer) {
-        await new Promise(resolve => setTimeout(resolve, 500)); // Wait 500ms
-      }
-    }
+    //       if (this.peerConnection.remoteDescription && this.peerConnection.remoteDescription.type) {
+    //         this.peerConnection.addIceCandidate(candidate).catch(console.error);
+    //       } else {
+    //         queue.push(candidate);
+    //       }
+    //     }
+    //   });
+    // });
 
-    return offer;
-  }
-
-  async listenForCandidates(callDoc: any, type: 'offer' | 'answer') {
-    const candidatesCol = collection(callDoc, `${type}Candidates`);
-
-    onSnapshot(candidatesCol, (snapshot) => {
-      snapshot.docChanges().forEach(change => {
+    onSnapshot(candidatesCollection, (snapshot) => {
+      snapshot.docChanges().forEach((change) => {
         if (change.type === 'added') {
-          const candidateData = change.doc.data();
-          const candidate = new RTCIceCandidate(candidateData);
+          const data: any = change.doc.data();
 
-          if (this.peerConnection.remoteDescription && this.peerConnection.remoteDescription.type) {
-            this.peerConnection.addIceCandidate(candidate).catch(console.error);
+          // Validate the candidate structure
+          if (!data || !data.candidate || typeof data.candidate !== 'string') {
+            console.warn('⚠️ Skipping malformed ICE candidate:', data);
+            return;
+          }
+
+          const iceCandidateInit: RTCIceCandidateInit = {
+            candidate: data.candidate,
+            sdpMLineIndex: data.sdpMLineIndex,
+            sdpMid: data.sdpMid,
+          };
+
+          // Queue or add
+          if (!this.peerConnection.remoteDescription || !this.peerConnection.remoteDescription.type) {
+            console.log('🕗 Remote description not ready, queuing ICE:', iceCandidateInit);
+            queue.push(iceCandidateInit);
           } else {
-            this.candidateQueue.push(candidate);
+            this.peerConnection.addIceCandidate(new RTCIceCandidate(iceCandidateInit))
+              .then(() => console.log('✅ Added ICE candidate (live):', iceCandidateInit))
+              .catch(err => console.error('❌ Error adding ICE candidate (live):', err));
           }
         }
       });
     });
 
-    this.processQueuedCandidatesWhenReady();
-  }
+    // Wait until remote description is set
+    const waitUntilRemoteReady = async () => {
+      while (!this.peerConnection.remoteDescription || !this.peerConnection.remoteDescription.type) {
+        await new Promise(res => setTimeout(res, 100));
+      }
 
-  private async processQueuedCandidatesWhenReady() {
-    while (!this.peerConnection.remoteDescription || !this.peerConnection.remoteDescription.type) {
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-
-    for (const candidate of this.candidateQueue) {
-      await this.peerConnection.addIceCandidate(candidate).catch(console.error);
-    }
-
-    this.candidateQueue = [];
+      for (const c of queue) {
+        if (!c.candidate || c.candidate.trim() === '') {
+          console.warn('⚠️ Skipping empty queued ICE:', c);
+          continue;
+        }
+        try {
+          await this.peerConnection.addIceCandidate(new RTCIceCandidate(c));
+        } catch (err) {
+          console.error('Error adding queued ICE candidate:', err);
+        }
+      }
+    };
+    waitUntilRemoteReady();
   }
 
   onRemoteStream(callback: (stream: MediaStream) => void) {
-    callback(this.remoteStream);
+    // this.peerConnection.addEventListener('track', async (event) => {
+    //   const [remoteStreama] = event.streams;
+    //   remoteStream.srcObject = remoteStream;
+    // });
+    this.peerConnection.addEventListener('track', event => {
+    console.log('Got remote track:', event.streams[0]);
+    event.streams[0].getTracks().forEach(track => {
+      console.log('Add a track to the remoteStream:', track);
+      this.remoteStream.addTrack(track);
+    });
+  });
   }
+
+  resetConnection() {
+    this.peerConnection?.close();
+
+    this.peerConnection = new RTCPeerConnection({
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+    });
+
+    this.remoteStream = new MediaStream();
+
+    if (this.localStream) {
+      this.localStream.getTracks().forEach(track => {
+        this.peerConnection.addTrack(track, this.localStream);
+      });
+    }
+
+    this.peerConnection.ontrack = (event) => {
+      console.log("in track",event.streams[0]);
+      
+      event.streams[0].getTracks().forEach(track => {
+        this.remoteStream.addTrack(track);
+      });
+    };
+  }
+
 }
