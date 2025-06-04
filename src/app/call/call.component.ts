@@ -25,6 +25,7 @@ export class CallComponent implements OnInit, OnDestroy {
   currentUserId = localStorage.getItem("user") || '';
   otherUserId!: string;
   private callDoc: any;
+  callCompId: any;
 
   constructor(
     private route: ActivatedRoute,
@@ -34,7 +35,8 @@ export class CallComponent implements OnInit, OnDestroy {
   ) { }
 
   async ngOnInit() {
-    this.otherUserId = this.route.snapshot.params['uid'];
+    this.callCompId = this.route.snapshot.params['uid'];
+    this.otherUserId = (this.callCompId.split("_")[0] != this.currentUserId)? this.callCompId.split("_")[0] : this.callCompId.split("_")[1];
     console.log(this.otherUserId);
 
     this.webrtcService.resetConnection();
