@@ -8,9 +8,10 @@ import {
 import { ActivatedRoute, Router } from '@angular/router';
 import { FirebaseService } from '../services/firebase.service';
 import { WebrtcService } from '../services/webrtc.service';
-import { collection, deleteDoc, getDoc } from 'firebase/firestore';
-import { doc } from '@angular/fire/firestore';
+import { collection, deleteDoc, getDoc, where } from 'firebase/firestore';
+import { doc, onSnapshot } from '@angular/fire/firestore';
 import { showMessage } from '../alerts_messages/alert-messages.component';
+import { from } from 'rxjs';
 
 @Component({
   selector: 'app-call',
@@ -33,7 +34,7 @@ export class CallComponent implements OnInit, OnDestroy {
   ) { }
 
   async ngOnInit() {
-    this.otherUserId = this.route.snapshot.params['uid'].split(`_${this.currentUserId}`)[0];
+    this.otherUserId = this.route.snapshot.params['uid'];
     console.log(this.otherUserId);
 
     this.webrtcService.resetConnection();
@@ -56,7 +57,7 @@ export class CallComponent implements OnInit, OnDestroy {
 
 
     const snapshot = await getDoc(this.callDoc);
-    console.log(snapshot);
+    console.log(snapshot.data());
 
     const data: any = snapshot.data();
     console.log(this.otherUserId, this.currentUserId);
@@ -70,6 +71,7 @@ export class CallComponent implements OnInit, OnDestroy {
       console.log('📞 Creating offer...');
       await this.webrtcService.createOffer(this.callDoc, this.currentUserId, this.otherUserId);
     }
+
     // Listen for ICE candidates
     this.webrtcService.listenForCandidates(this.callDoc, 'offer');
     this.webrtcService.listenForCandidates(this.callDoc, 'answer');
@@ -83,19 +85,28 @@ export class CallComponent implements OnInit, OnDestroy {
     }
   }
 
-  async endCall() {
-    try {
-      if (this.callDoc) {
-        await deleteDoc(this.callDoc);
-        showMessage("Call Ended", "call has been ended", "info")
-      }
-    } catch (err) {
-      showMessage("Error", "Something went wrong", 'error')
+  // In CallComponent
+async endCall() {
+  try {
+    // Stop all media tracks
+    const localStream = this.localVideo.nativeElement.srcObject as MediaStream;
+    const remoteStream = this.remoteVideo.nativeElement.srcObject as MediaStream;
+    
+    localStream?.getTracks().forEach(track => track.stop());
+    remoteStream?.getTracks().forEach(track => track.stop());
+    
+    // Clean up Firestore document
+    if (this.callDoc) {
+      await deleteDoc(this.callDoc);
+      showMessage("Call Ended", "Call has been ended", "info");
     }
-
-    // Optionally navigate away
+  } catch (err) {
+    console.error('Error ending call:', err);
+    showMessage("Error", "Something went wrong", 'error');
+  } finally {
     this.router.navigate(['/chat']);
   }
+}
 
   ngOnDestroy() {
     this.endCall();
