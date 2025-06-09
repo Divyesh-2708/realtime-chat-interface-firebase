@@ -1,0 +1,7 @@
+node_modules
+dist
+*.log
+.env
+Dockerfile
+docker-compose.yml
+src/app/environment

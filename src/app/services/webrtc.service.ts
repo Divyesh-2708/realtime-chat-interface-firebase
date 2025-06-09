@@ -16,7 +16,7 @@ export class WebrtcService {
   remoteStream = new MediaStream();
   private candidateQueue: RTCIceCandidateInit[] = [];
   private isRemoteDescriptionSet = false;
-  remoteStreamCallback? :(stream:MediaStream) => void;
+  remoteStreamCallback?: (stream: MediaStream) => void;
 
   constructor(private firestore: Firestore) {
     this.initializePeer();
@@ -28,7 +28,14 @@ export class WebrtcService {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:global.stun.twilio.com:3478' },
-        // { urls: 'stun:stun2.l.google.com:19302' }
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' },
+        { urls: 'stun:stun.services.mozilla.com' },
+        { urls: 'stun:stun.stunprotocol.org:3478' },
+        { urls: 'stun:openrelay.metered.ca:80' },
       ],
       iceCandidatePoolSize: 5
     });
@@ -54,7 +61,7 @@ export class WebrtcService {
     };
 
     this.peerConnection.addEventListener('track', (event) => {
-      console.log("🎥 Received remote track:", event.streams[0]);
+      // console.log("🎥 Received remote track:", event.streams[0]);
       event.streams[0].getTracks().forEach(track => {
         if (!this.remoteStream.getTracks().some(t => t.id === track.id)) {
           this.remoteStream.addTrack(track);
@@ -213,6 +220,7 @@ export class WebrtcService {
     //   });
     //   callback(this.remoteStream);
     // };
+    // this.remoteStreamCallback(streams[0]);
     this.remoteStreamCallback = callback;
   }
 
