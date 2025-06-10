@@ -16,17 +16,19 @@ export class WebrtcService {
   remoteStream = new MediaStream();
   private candidateQueue: RTCIceCandidateInit[] = [];
   private isRemoteDescriptionSet = false;
+  remoteStreamCallback? :(stream:MediaStream) => void;
 
   constructor(private firestore: Firestore) {
     this.initializePeer();
+    this.resetConnection()
   }
 
   initializePeer() {
     this.peerConnection = new RTCPeerConnection({
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' }
+        { urls: 'stun:global.stun.twilio.com:3478' },
+        // { urls: 'stun:stun2.l.google.com:19302' }
       ],
       iceCandidatePoolSize: 5
     });
@@ -51,12 +53,19 @@ export class WebrtcService {
       }
     };
 
-    this.peerConnection.ontrack = (event) => {
+    this.peerConnection.addEventListener('track', (event) => {
       console.log("🎥 Received remote track:", event.streams[0]);
       event.streams[0].getTracks().forEach(track => {
-        this.remoteStream.addTrack(track);
+        if (!this.remoteStream.getTracks().some(t => t.id === track.id)) {
+          this.remoteStream.addTrack(track);
+        }
       });
-    };
+
+      // Trigger stored callback if registered
+      if (this.remoteStreamCallback) {
+        this.remoteStreamCallback(this.remoteStream);
+      }
+    });
 
     this.peerConnection.onconnectionstatechange = () => {
       console.log('Connection state:', this.peerConnection.connectionState);
@@ -65,26 +74,26 @@ export class WebrtcService {
 
   async initLocalStream(): Promise<MediaStream> {
     try {
-      this.localStream = await navigator.mediaDevices.getUserMedia({ 
-        video: true, 
-        audio: true 
+      this.localStream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: true
       });
 
       this.localStream.getTracks().forEach(track => {
-        console.log(`Adding local ${track.kind} track to peer connection`);
+        // console.log(`Adding local ${track.kind} track to peer connection`); local complete 
         this.peerConnection.addTrack(track, this.localStream);
       });
 
       return this.localStream;
     } catch (error) {
-      console.error('Error accessing media devices:', error);
+      console.log('Error accessing media devices:', error);
       throw error;
     }
   }
 
   async createOffer(callDocRef: any, from: string, to: string) {
     const offerCandidates = collection(this.firestore, `${callDocRef.path}/offerCandidates`);
-    
+
     this.peerConnection.onicecandidate = (event) => {
       if (event.candidate) {
         const candidateData = this.prepareCandidateData(event.candidate);
@@ -138,19 +147,19 @@ export class WebrtcService {
 
   async listenForCandidates(callDocRef: any, type: 'offer' | 'answer') {
     const candidatesCollection = collection(this.firestore, `${callDocRef.path}/${type}Candidates`);
-    
+
     onSnapshot(candidatesCollection, (snapshot) => {
       snapshot.docChanges().forEach((change) => {
         if (change.type === 'added') {
           const data = change.doc.data();
-          console.log(`Received ${type} candidate:`, data);
-          
+          // console.log(`Received ${type} candidate:`, data);
+
           if (this.isValidCandidate(data)) {
             if (this.peerConnection.remoteDescription) {
               this.addIceCandidateSafely(data);
             } else {
               this.candidateQueue.push(data);
-              console.log('Queuing candidate until remote description is set');
+              // console.log('Queuing candidate until remote description is set');
             }
           }
         }
@@ -167,10 +176,10 @@ export class WebrtcService {
     };
   }
 
-  private isValidCandidate(candidate: RTCIceCandidateInit): boolean | undefined |string{
+  private isValidCandidate(candidate: RTCIceCandidateInit): boolean | undefined | string {
     return (
-      candidate.candidate && 
-      candidate.sdpMid !== undefined && 
+      candidate.candidate &&
+      candidate.sdpMid !== undefined &&
       candidate.sdpMLineIndex !== undefined
     );
   }
@@ -179,9 +188,9 @@ export class WebrtcService {
     try {
       const candidate = new RTCIceCandidate(candidateData);
       await this.peerConnection.addIceCandidate(candidate);
-      console.log('Successfully added ICE candidate');
+      // console.log('Successfully added ICE candidate');
     } catch (error) {
-      console.error('Error adding ICE candidate:', error);
+      // console.log('Error adding ICE candidate:', error);
       // Optionally retry or implement fallback
     }
   }
@@ -195,15 +204,16 @@ export class WebrtcService {
     }
   }
 
-  onRemoteStream(callback: (stream: MediaStream) => void) {
-    this.peerConnection.ontrack = (event) => {
-      event.streams[0].getTracks().forEach(track => {
-        if (!this.remoteStream.getTracks().some(t => t.id === track.id)) {
-          this.remoteStream.addTrack(track);
-        }
-      });
-      callback(this.remoteStream);
-    };
+  async onRemoteStream(callback: (stream: MediaStream) => void) {
+    // this.peerConnection.ontrack = (event) => {
+    //   event.streams[0].getTracks().forEach(track => {
+    //     if (!this.remoteStream.getTracks().some(t => t.id === track.id)) {
+    //       this.remoteStream.addTrack(track);
+    //     }
+    //   });
+    //   callback(this.remoteStream);
+    // };
+    this.remoteStreamCallback = callback;
   }
 
   resetConnection() {
@@ -211,10 +221,10 @@ export class WebrtcService {
       // Stop all media tracks
       this.localStream?.getTracks().forEach(track => track.stop());
       this.remoteStream?.getTracks().forEach(track => track.stop());
-      
+
       // Close peer connection
       this.peerConnection?.close();
-      
+
       console.log('Connection reset complete');
     } catch (error) {
       console.error('Error resetting connection:', error);

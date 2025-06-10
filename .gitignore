@@ -11,6 +11,9 @@
 npm-debug.log
 yarn-error.log
 
+# Environment 
+/src/app/environment
+
 # IDEs and editors
 .idea/
 .project
@@ -45,3 +48,4 @@ Thumbs.db
 .firebase
 *-debug.log
 .runtimeconfig.json
+/src/app/environment
